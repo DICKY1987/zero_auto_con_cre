@@ -1,0 +1,388 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: AutoContent Pro - Zero/Min Touch Omni-channel
+
+Parameters:
+  ParamRegion: { Type: String, Default: us-east-1 }
+  ParamYouTubeClientId: { Type: String, NoEcho: true }
+  ParamYouTubeClientSecret: { Type: String, NoEcho: true }
+  ParamFacebookAppId: { Type: String, NoEcho: true }
+  ParamFacebookAppSecret: { Type: String, NoEcho: true }
+  ParamTikTokClientKey: { Type: String, NoEcho: true }
+  ParamTikTokClientSecret: { Type: String, NoEcho: true }
+  ParamBudgetEmail: { Type: String, Default: nobody@example.com }
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 90
+    MemorySize: 512
+    Tracing: Active
+    Environment:
+      Variables:
+        REGION: !Ref ParamRegion
+        ASSETS_BUCKET: !Ref AssetsBucket
+        CONTENT_TABLE: !Ref ContentTable
+        IDEMPOTENCY_TABLE: !Ref IdempotencyTable
+        TOKENS_TABLE: !Ref TokensTable
+
+Resources:
+
+  # DynamoDB
+  ContentTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: topic, AttributeType: S }
+        - { AttributeName: sk, AttributeType: S }
+      KeySchema:
+        - { AttributeName: topic, KeyType: HASH }
+        - { AttributeName: sk, KeyType: RANGE }
+      TableName: !Sub "${AWS::StackName}-content"
+
+  IdempotencyTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: k, AttributeType: S }
+      KeySchema:
+        - { AttributeName: k, KeyType: HASH }
+      TableName: !Sub "${AWS::StackName}-idem"
+
+  TokensTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: provider, AttributeType: S }
+      KeySchema:
+        - { AttributeName: provider, KeyType: HASH }
+      TableName: !Sub "${AWS::StackName}-tokens"
+
+  # S3
+  AssetsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration: { Status: Enabled }
+
+  PortalBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      WebsiteConfiguration: { IndexDocument: index.html }
+      AccessControl: PublicRead
+
+  PortalBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref PortalBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: PublicReadGetObject
+            Effect: Allow
+            Principal: "*"
+            Action: "s3:GetObject"
+            Resource: !Sub "${PortalBucket.Arn}/*"
+
+  # HTTP API
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins: ['*']
+        AllowHeaders: ['*']
+        AllowMethods: ['GET','POST']
+
+  # --- Auth: YouTube / Facebook / TikTok ---
+  AuthStartYouTube:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/auth/youtube/start/
+      Handler: handler.lambda_handler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: "ssm:GetParameter"
+              Resource: "*"
+      Events:
+        Start:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /auth/youtube/start, Method: GET }
+
+  AuthCallbackYouTube:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/auth/youtube/callback/
+      Handler: handler.lambda_handler
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref TokensTable }
+        - Statement:
+            - Effect: Allow
+              Action: "ssm:GetParameter"
+              Resource: "*"
+      Events:
+        Callback:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /auth/youtube/callback, Method: GET }
+
+  AuthStartFacebook:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/auth/facebook/start/
+      Handler: handler.lambda_handler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: "ssm:GetParameter"
+              Resource: "*"
+      Events:
+        Start:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /auth/facebook/start, Method: GET }
+
+  AuthCallbackFacebook:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/auth/facebook/callback/
+      Handler: handler.lambda_handler
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref TokensTable }
+        - Statement:
+            - Effect: Allow
+              Action: "ssm:GetParameter"
+              Resource: "*"
+      Events:
+        Callback:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /auth/facebook/callback, Method: GET }
+
+  AuthStartTikTok:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/auth/tiktok/start/
+      Handler: handler.lambda_handler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: "ssm:GetParameter"
+              Resource: "*"
+      Events:
+        Start:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /auth/tiktok/start, Method: GET }
+
+  AuthCallbackTikTok:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/auth/tiktok/callback/
+      Handler: handler.lambda_handler
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref TokensTable }
+        - Statement:
+            - Effect: Allow
+              Action: "ssm:GetParameter"
+              Resource: "*"
+      Events:
+        Callback:
+          Type: HttpApi
+          Properties: { ApiId: !Ref HttpApi, Path: /auth/tiktok/callback, Method: GET }
+
+  # Pipeline Lambdas
+  TopicIntake:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/pipeline/topic_intake/
+      Handler: handler.lambda_handler
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref ContentTable }
+
+  Research:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/pipeline/research/
+      Handler: handler.lambda_handler
+
+  ScriptGen:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/pipeline/script_generation/
+      Handler: handler.lambda_handler
+
+  QAGate:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/pipeline/qa/
+      Handler: handler.lambda_handler
+
+  Voice:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/pipeline/voice/
+      Handler: handler.lambda_handler
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: "polly:SynthesizeSpeech"
+              Resource: "*"
+        - S3CrudPolicy: { BucketName: !Ref AssetsBucket }
+
+  Video:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      ImageUri: video_function:python3.12-v2
+      Timeout: 900
+      MemorySize: 2048
+      Policies:
+        - S3CrudPolicy: { BucketName: !Ref AssetsBucket }
+    Metadata:
+      Dockerfile: src/pipeline/video/Dockerfile
+      DockerContext: src/pipeline/video/
+      DockerTag: python3.12-v2
+
+  UploadYouTube:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/publish/youtube/
+      Handler: handler.lambda_handler
+      Timeout: 180
+      MemorySize: 512
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref TokensTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref IdempotencyTable }
+        - S3ReadPolicy: { BucketName: !Ref AssetsBucket }
+
+  UploadFacebook:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/publish/facebook/
+      Handler: handler.lambda_handler
+      Timeout: 180
+      MemorySize: 512
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref TokensTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref IdempotencyTable }
+        - S3ReadPolicy: { BucketName: !Ref AssetsBucket }
+
+  UploadInstagram:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/publish/instagram/
+      Handler: handler.lambda_handler
+      Timeout: 180
+      MemorySize: 512
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref TokensTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref IdempotencyTable }
+        - S3ReadPolicy: { BucketName: !Ref AssetsBucket }
+
+  UploadTikTok:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/publish/tiktok/
+      Handler: handler.lambda_handler
+      Timeout: 180
+      MemorySize: 512
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref TokensTable }
+        - DynamoDBCrudPolicy: { TableName: !Ref IdempotencyTable }
+        - S3ReadPolicy: { BucketName: !Ref AssetsBucket }
+
+  # Step Functions
+  StateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub "${AWS::StackName}-pipeline"
+      DefinitionUri: statemachine/definition.json
+      DefinitionSubstitutions:
+        TopicIntakeArn: !GetAtt TopicIntake.Arn
+        ResearchArn: !GetAtt Research.Arn
+        ScriptGenArn: !GetAtt ScriptGen.Arn
+        QAGateArn: !GetAtt QAGate.Arn
+        VoiceArn: !GetAtt Voice.Arn
+        VideoArn: !GetAtt Video.Arn
+        UploadYouTubeArn: !GetAtt UploadYouTube.Arn
+        UploadFacebookArn: !GetAtt UploadFacebook.Arn
+        UploadInstagramArn: !GetAtt UploadInstagram.Arn
+        UploadTikTokArn: !GetAtt UploadTikTok.Arn
+      Policies:
+        - LambdaInvokePolicy: { FunctionName: !Ref TopicIntake }
+        - LambdaInvokePolicy: { FunctionName: !Ref Research }
+        - LambdaInvokePolicy: { FunctionName: !Ref ScriptGen }
+        - LambdaInvokePolicy: { FunctionName: !Ref QAGate }
+        - LambdaInvokePolicy: { FunctionName: !Ref Voice }
+        - LambdaInvokePolicy: { FunctionName: !Ref Video }
+        - LambdaInvokePolicy: { FunctionName: !Ref UploadYouTube }
+        - LambdaInvokePolicy: { FunctionName: !Ref UploadFacebook }
+        - LambdaInvokePolicy: { FunctionName: !Ref UploadInstagram }
+        - LambdaInvokePolicy: { FunctionName: !Ref UploadTikTok }
+
+  # Schedule
+  StartRule:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: rate(8 hours)
+      State: ENABLED
+      Targets:
+        - Arn: !Ref StateMachine
+          Id: StartStateMachine
+          RoleArn: !GetAtt EventsToSFNRole.Arn
+
+  EventsToSFNRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: events-to-sfn
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: "states:StartExecution"
+                Resource: !Ref StateMachine
+
+  # CloudWatch Dashboard
+  Dashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${AWS::StackName}-dashboard"
+      DashboardBody: !Sub |
+        {"widgets": [{"type": "metric", "x": 0, "y": 0, "width": 12, "height": 6, "properties": {"metrics": [["AWS/States", "ExecutionsStarted", "StateMachineArn", "${StateMachineArn}"], [".", "ExecutionsSucceeded", ".", "."], [".", "ExecutionsFailed", ".", "."], [".", "ExecutionsTimedOut", ".", "."]], "period": 300, "stat": "Sum", "region": "${AWS::Region}", "title": "State Machine Executions"}}, {"type": "metric", "x": 12, "y": 0, "width": 12, "height": 6, "properties": {"metrics": [["AWS/Lambda", "Errors", "FunctionName", "${UploadYouTubeName}"], [".", "Throttles", ".", "."], [".", "Invocations", ".", "."]], "period": 300, "stat": "Sum", "region": "${AWS::Region}", "title": "Uploader (YouTube)"}}]}
+
+  # Budget (optional)
+  MonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: !Sub "${AWS::StackName}-monthly"
+        BudgetLimit: { Amount: 25, Unit: USD }
+        BudgetType: COST
+        TimeUnit: MONTHLY
+      NotificationsWithSubscribers:
+        - Notification:
+            ComparisonOperator: GREATER_THAN
+            NotificationType: ACTUAL
+            Threshold: 50
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref ParamBudgetEmail
+
+Outputs:
+  PortalURL:
+    Value: !Sub "http://${PortalBucket}.s3-website-${AWS::Region}.amazonaws.com"
+  HttpApiUrl:
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
+  StateMachineArn:
+    Value: !Ref StateMachine
+  AssetsBucketName:
+    Value: !Ref AssetsBucket
+  DashboardJson:
+    Value: !Ref Dashboard

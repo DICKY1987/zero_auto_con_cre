@@ -1,0 +1,27 @@
+{
+  "Comment": "AutoContent Pro pipeline",
+  "StartAt": "TopicIntake",
+  "States": {
+    "TopicIntake": { "Type": "Task", "Resource": "${TopicIntakeArn}", "ResultPath": "$.topic", "Next": "Research" },
+    "Research": { "Type": "Task", "Resource": "${ResearchArn}", "ResultPath": "$.research", "Next": "ScriptGeneration" },
+    "ScriptGeneration": { "Type": "Task", "Resource": "${ScriptGenArn}", "ResultPath": "$.script", "Next": "QAGate" },
+    "QAGate": { "Type": "Task", "Resource": "${QAGateArn}", "ResultPath": "$.qa", "Next": "QAGateChoice" },
+    "QAGateChoice": {
+      "Type": "Choice",
+      "Choices": [{ "Variable": "$.qa.ok", "BooleanEquals": true, "Next": "Voice" }],
+      "Default": "ScriptGeneration"
+    },
+    "Voice": { "Type": "Task", "Resource": "${VoiceArn}", "ResultPath": "$.voice", "Next": "Video" },
+    "Video": { "Type": "Task", "Resource": "${VideoArn}", "ResultPath": "$.video", "Next": "Publish" },
+    "Publish": {
+      "Type": "Parallel",
+      "Branches": [
+        { "StartAt": "UploadYouTube", "States": { "UploadYouTube": { "Type": "Task", "Resource": "${UploadYouTubeArn}", "End": true }}},
+        { "StartAt": "UploadFacebook", "States": { "UploadFacebook": { "Type": "Task", "Resource": "${UploadFacebookArn}", "End": true }}},
+        { "StartAt": "UploadInstagram", "States": { "UploadInstagram": { "Type": "Task", "Resource": "${UploadInstagramArn}", "End": true }}},
+        { "StartAt": "UploadTikTok", "States": { "UploadTikTok": { "Type": "Task", "Resource": "${UploadTikTokArn}", "End": true }}}
+      ],
+      "End": true
+    }
+  }
+}

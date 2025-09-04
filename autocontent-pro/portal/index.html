@@ -1,0 +1,38 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>AutoContent Pro • Setup Portal</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 2rem; max-width: 900px; margin: auto; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 1rem 1.2rem; }
+    button { padding: .7rem 1rem; border-radius: 10px; border: 0; background: #111; color: #fff; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>AutoContent Pro • Setup Portal</h1>
+  <p>Link your channels once, then the system runs on a schedule.</p>
+  <div class="grid">
+    <div class="card">
+      <h2>YouTube</h2>
+      <p>Authorize uploads to your channel (one-time).</p>
+      <button onclick="window.location = API_BASE + '/auth/youtube/start'">Connect YouTube</button>
+    </div>
+    <div class="card">
+      <h2>Facebook / Instagram</h2>
+      <p>Authorize a Page & IG account. Callback stores long-lived page token automatically.</p>
+      <button onclick="window.location = API_BASE + '/auth/facebook/start'">Connect Facebook/IG</button>
+    </div>
+    <div class="card">
+      <h2>TikTok</h2>
+      <p>Authorize uploads to TikTok (Business/Open API).</p>
+      <button onclick="window.location = API_BASE + '/auth/tiktok/start'">Connect TikTok</button>
+    </div>
+  </div>
+  <script>
+    const API_BASE = location.origin.replace('http://', 'https://');
+  </script>
+</body>
+</html>

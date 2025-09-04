@@ -1,41 +1,22 @@
-import os, uuid, boto3, tempfile, math
+import os, uuid, boto3, tempfile
 from moviepy.editor import TextClip, CompositeVideoClip, ColorClip, AudioFileClip
-
-ASSETS_BUCKET = os.getenv("ASSETS_BUCKET")
-s3 = boto3.client("s3")
-
+ASSETS_BUCKET=os.getenv("ASSETS_BUCKET"); s3=boto3.client("s3")
 def _compose(script, audio_path, size):
-    w, h = size
-    duration = 60
-    bg = ColorClip(size=(w, h), color=(10, 10, 10), duration=duration)
-    txt = TextClip(script, fontsize=48, color='white', size=(w-120, h-120), method='caption').set_duration(duration).set_position('center')
-    video = CompositeVideoClip([bg, txt])
+    w,h=size; bg=ColorClip(size=(w,h), color=(10,10,10), duration=60)
+    txt=TextClip(script, fontsize=48, color='white', size=(w-120,h-120), method='caption').set_duration(60).set_position('center')
+    v=CompositeVideoClip([bg,txt])
     if audio_path and os.path.exists(audio_path):
-        audio = AudioFileClip(audio_path)
-        duration = min(video.duration, audio.duration)
-        video = video.set_audio(audio).set_duration(duration)
-    return video
-
-def _render_and_upload(video):
-    out_path = os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.mp4")
-    video.write_videofile(out_path, fps=24, codec="libx264", audio_codec="aac", verbose=False, logger=None)
-    key = f"videos/{os.path.basename(out_path)}"
-    s3.upload_file(out_path, ASSETS_BUCKET, key)
-    return key
-
+        a=AudioFileClip(audio_path); v=v.set_audio(a).set_duration(min(v.duration,a.duration))
+    return v
+def _render(v):
+    out=os.path.join(tempfile.gettempdir(), f"{uuid.uuid4()}.mp4")
+    v.write_videofile(out, fps=24, codec="libx264", audio_codec="aac", verbose=False, logger=None); return out
 def lambda_handler(event, context):
-    script = (event or {}).get("script", {}).get("script_text", "Hello from AutoContent Pro.")
-    audio_key = (event or {}).get("voice", {}).get("audio_s3_key")
-
-    audio_path = None
+    script=(event or {}).get("script",{}).get("script_text","Hello")
+    audio_key=(event or {}).get("voice",{}).get("audio_s3_key")
+    ap=None
     if audio_key:
-        audio_path = os.path.join(tempfile.gettempdir(), "voice.mp3")
-        s3.download_file(ASSETS_BUCKET, audio_key, audio_path)
-
-    video_916 = _compose(script, audio_path, (1080, 1920))
-    key_916 = _render_and_upload(video_916)
-
-    video_169 = _compose(script, audio_path, (1920, 1080))
-    key_169 = _render_and_upload(video_169)
-
-    return {"video_portrait_s3_key": key_916, "video_landscape_s3_key": key_169}
+        ap=os.path.join(tempfile.gettempdir(),"voice.mp3"); s3.download_file(ASSETS_BUCKET, audio_key, ap)
+    v916=_compose(script,ap,(1080,1920)); p916=_render(v916); k916=f"videos/{os.path.basename(p916)}"; s3.upload_file(p916,ASSETS_BUCKET,k916)
+    v169=_compose(script,ap,(1920,1080)); p169=_render(v169); k169=f"videos/{os.path.basename(p169)}"; s3.upload_file(p169,ASSETS_BUCKET,k169)
+    return {"video_portrait_s3_key": k916, "video_landscape_s3_key": k169}
